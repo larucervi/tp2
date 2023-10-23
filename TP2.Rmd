@@ -1,0 +1,126 @@
+---
+title: "TP2"
+author: "Lara"
+date: "2023-10-21"
+output: html_document
+---
+
+El siguiente trabajo tiene el objetivo de hacer un breve analisis sobre los resultados provisionales del Censo de 2022, lanzados en febrero de 2023, descargable en formato .xlsl a través de: https://censo.gob.ar/wp-content/uploads/2023/05/cnphv2022_condiciones_habitacionales.xlsx - Cuadro 1. Total del país. Condiciones habitacionales de las viviendas particulares ocupadas, por jurisdicción, en porcentaje. Año 2022 												
+
+Precisamente, se buscará explorar la situacion de la tenencia de la vivienda a lo largo del país, teniendo en cuenta la calidad de construcción de la vivienda. 
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(geoAr)
+library(ggmap)
+library(ggplot2)
+library(sf)
+library(janitor)
+```
+
+
+```{r}
+censo_condiciones <- openxlsx::read.xlsx("cnphv2022_hab.xlsx")
+```
+
+Primero, se procederá a hacer una limpieza de la base para una manipulación más facil de los datos. 
+
+```{r}
+censo_condiciones <- clean_names(censo_condiciones)
+```
+
+```{r}
+skim(censo_condiciones)
+```
+
+
+Para explorar dichos resultados, se formula a continuación una tabla para detectar cuáles provincias presentan los valores minimos y máximos para cada variable:
+
+```{r}
+max_variables <- censo_condiciones %>% 
+  pivot_longer(cols = -jurisdiccion,
+               names_to = "variable",
+               values_to = "valor") %>%
+  group_by(variable) %>% 
+  slice_max(valor)
+```
+
+
+```{r}
+min_variable <- censo_condiciones %>% 
+  pivot_longer(cols = -jurisdiccion,
+               names_to = "variable",
+               values_to = "valor") %>%
+  group_by(variable) %>% 
+  slice_min(valor) 
+```
+
+Se observa que, mientras que la Ciudad de Buenos Aires predomina en la mayoría de los valores en calidad constructiva y habitacional, es la que también menor tenencia propia de vivienda presenta. De modo inverso, se observa que mientras que Santiago del Estero y Formosa tienen un peor desempeño en la calidad de la vivienda, es la primera la que tiene mayor tenencia de vivienda propia.
+
+En este sentido, se va a explorar la relacion entre tenencia  vivienda respecto a las demas variables y hacer una comparación geográfica al respecto. ¿guarda alguna relación?
+
+Para ello uno mi actual base de datos con su localización espacideal, definida por GeoAr
+```{r}
+arg_geo <- get_geo(geo = "ARGENTINA",
+                   level="provincia",simplified = F)
+```
+
+*Reemplazar "Tierra del Fuego, Antártida e Islas del Atlántico Sur (1)" por "Tierra del Fuego" en mi columna "jurisdiccion" en mi base de datos "censo_condiciones*
+```{r}
+library(dplyr)
+
+#censo_condiciones$jurisdiccion <- iconv(censo_condiciones$jurisdiccion, "UTF-8", "ASCII//TRANSLIT")
+
+censo_condiciones <- censo_condiciones %>% 
+  mutate(jurisdiccion = str_squish(jurisdiccion),
+         jurisdiccion = if_else(jurisdiccion == "Tierra del Fuego, Antártida e Islas del Atlántico Sur (1)",
+                                "Tierra del Fuego",
+                                jurisdiccion))
+```
+
+
+```{r}
+censo_condiciones <- arg_geo %>% 
+  left_join(censo_condiciones, by = c("provincia" = "jurisdiccion"))
+```
+
+En primer lugar, se dispondrá la comparación provincial de tenencia propia de la vivienda y de red de gas o electricidad en pos de  una variable proxy para identificar la calidad de la vivienda. 
+
+
+```{r}
+censo_condiciones %>% 
+  select (provincia, dos_o_mas_banos, vivienda_propia) %>% 
+  pivot_longer(cols = c("dos_o_mas_banos", "vivienda_propia"), names_to = "variable", values_to = "valor") %>% 
+  ggplot()+
+  geom_sf(aes(fill=valor))+
+  scale_fill_viridis_c (option = "inferno", direction = -1)+
+  facet_grid(~variable)+
+  theme_void()
+```
+A partir del gráfico anterior, incluso teniendo en cuenta la diversidad de la escala aplicada a cada variable, es posible ver para cada mapa la distibución de valores y su concentración. Mientras que la calidad de la vivienda merma hacia el norte, es allí también donde aumentan los valores respecto de tenencia de la vivienda en detrimentro del sur. 
+
+Se observan entoonces algunos patrones espaciales. Para observar mejor la relación de este fenómeno, se desplegaran a continuación en un gráfico de matriz de correlaciones sobre las condiciones habitacionales entre sí mismas. 
+
+
+```{r}
+mi_paleta <- colorRampPalette(c("navy","#91CBD765", "#CA225E"))
+```
+
+```{r}
+prueba <- censo_condiciones %>% 
+  select (-provincia, -codprov_censo, -geometry) %>%
+  st_set_geometry(NULL) %>% 
+  rename_with(~ str_to_title(.),)  %>% 
+  rename_with(~ str_replace_all(.,"_"," "),)  %>% 
+    cor() %>% 
+    corrplot(col = mi_paleta(200), tl.col = "black", tl.cex = 0.5,  method="square")
+```
+En este gráfico puede verse de manera más clara, que la vivienda propia no sólo es la única variable que correlaciona de manera negativa con dos o más baños, sino que lo hace con todas las variables relacionadas a las condiciones habitacionales. Asimismo, lo hace de manera contundente. Si bien se necesita un mayor esclarecimiento de los datos del censo, se debe atender a esta relación entre la calidad de la vivienda que es propia y su evolución, muy frecuente
+
+
+
+
+
+
+
